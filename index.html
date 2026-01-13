@@ -1,0 +1,1432 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Bomberman (Phaser 3) - Stage 1</title>
+  <style>
+    :root {
+      --ad-width: 200px;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #0b0f1a;
+      overflow: hidden;
+    }
+
+    #app {
+      height: 100%;
+      height: 100dvh;
+      width: 100%;
+      display: flex;
+      flex-direction: row;
+    }
+
+    .ad-slot {
+      width: var(--ad-width);
+      min-width: var(--ad-width);
+      max-width: var(--ad-width);
+      flex: 0 0 var(--ad-width);
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.8);
+      background: linear-gradient(180deg, #141a2a, #0d1220);
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      border-right: 1px solid rgba(0, 0, 0, 0.35);
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    #game-wrap {
+      flex: 1;
+      min-width: 1px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(1200px 800px at 50% 40%, rgba(88, 156, 255, 0.18), rgba(7, 10, 18, 0.95));
+      position: relative;
+      overflow: hidden;
+    }
+
+    #game-container {
+      width: 100%;
+      height: 100%;
+      min-width: 1px;
+      min-height: 1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Ensure canvas stays crisp and centered */
+    canvas {
+      display: block;
+      image-rendering: auto;
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    @media (max-width: 520px) {
+      :root {
+        --ad-width: 200px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="ad-left" class="ad-slot">Left Ad (200px)</div>
+    <div id="game-wrap">
+      <div id="game-container"></div>
+    </div>
+    <div id="ad-right" class="ad-slot">Right Ad (200px)</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script>
+    const GRID_SIZE = 13;
+    const TILE_SIZE = 48;
+    const WORLD_W = GRID_SIZE * TILE_SIZE;
+    const WORLD_H = GRID_SIZE * TILE_SIZE;
+
+    function tileToWorldCenter(tileX, tileY) {
+      return {
+        x: tileX * TILE_SIZE + TILE_SIZE / 2,
+        y: tileY * TILE_SIZE + TILE_SIZE / 2,
+      };
+    }
+
+    function worldToTile(worldX, worldY) {
+      return {
+        tileX: Phaser.Math.Clamp(Math.floor(worldX / TILE_SIZE), 0, GRID_SIZE - 1),
+        tileY: Phaser.Math.Clamp(Math.floor(worldY / TILE_SIZE), 0, GRID_SIZE - 1),
+      };
+    }
+
+    function isIndestructibleWall(tileX, tileY) {
+      const max = GRID_SIZE - 1;
+      if (tileX === 0 || tileY === 0 || tileX === max || tileY === max) return true;
+      if (tileX % 2 === 0 && tileY % 2 === 0) return true;
+      return false;
+    }
+
+    function isSpawnSafe(tileX, tileY) {
+      // Player spawn at (1,1) with two adjacent safe tiles.
+      if (tileX === 1 && tileY === 1) return true;
+      if (tileX === 1 && tileY === 2) return true;
+      if (tileX === 2 && tileY === 1) return true;
+      return false;
+    }
+
+    class GameScene extends Phaser.Scene {
+      constructor() {
+        super({ key: 'GameScene' });
+      }
+
+      spawnEnemies() {
+        // Spawn 2-4 enemies in safe corners (not overlapping player).
+        const corners = [
+          { x: GRID_SIZE - 2, y: 1 },
+          { x: 1, y: GRID_SIZE - 2 },
+          { x: GRID_SIZE - 2, y: GRID_SIZE - 2 },
+          { x: 1, y: 1 },
+        ];
+
+        // Never spawn on player's exact tile.
+        const filtered = corners.filter(c => !(c.x === this.playerTileX && c.y === this.playerTileY));
+        Phaser.Utils.Array.Shuffle(filtered);
+
+        const enemyCount = Phaser.Math.Between(2, 4);
+        const spawnList = filtered.slice(0, enemyCount);
+
+        for (const s of spawnList) {
+          // If a destructible block is occupying the spawn, clear it.
+          if (this.blockByTile.has(`${s.x},${s.y}`)) {
+            this.destroyBlockAt(s.x, s.y);
+          }
+
+          const pos = tileToWorldCenter(s.x, s.y);
+          const shadow = this.add.image(pos.x, pos.y + 14, 'shadow');
+          shadow.setDepth(2.5);
+
+          const sprite = this.add.sprite(pos.x, pos.y, 'enemy');
+          sprite.setDepth(3);
+          sprite.play('enemy-idle');
+
+          this.enemies.push({
+            sprite,
+            shadow,
+            tileX: s.x,
+            tileY: s.y,
+            isMoving: false,
+            dir: Phaser.Math.RND.pick(['left', 'right', 'up', 'down']),
+            dead: false,
+            moveMs: 140,
+          });
+        }
+      }
+
+      updateEnemies() {
+        for (const e of this.enemies) {
+          if (!e || e.dead) continue;
+
+          // Update shadow follow in case of tween drift.
+          e.shadow.x = e.sprite.x;
+          e.shadow.y = e.sprite.y + 14;
+
+          // Contact damage (tile overlap)
+          if (!this.isInvulnerable && e.tileX === this.playerTileX && e.tileY === this.playerTileY) {
+            this.damagePlayer();
+          }
+
+          if (e.isMoving) continue;
+
+          // Try to continue in same direction; if blocked, pick a new one.
+          const attemptDirs = this.getEnemyAttemptDirs(e.dir);
+          let moved = false;
+          for (const dir of attemptDirs) {
+            const d = this.dirToDelta(dir);
+            const nx = e.tileX + d.dx;
+            const ny = e.tileY + d.dy;
+            if (this.isTileWalkableForEnemy(nx, ny)) {
+              e.dir = dir;
+              this.moveEnemyToTile(e, nx, ny);
+              moved = true;
+              break;
+            }
+          }
+
+          if (!moved) {
+            // stuck; randomize direction for next tick
+            e.dir = Phaser.Math.RND.pick(['left', 'right', 'up', 'down']);
+          }
+        }
+      }
+
+      getEnemyAttemptDirs(primaryDir) {
+        const dirs = ['left', 'right', 'up', 'down'];
+        const rest = dirs.filter(d => d !== primaryDir);
+        Phaser.Utils.Array.Shuffle(rest);
+        return [primaryDir, ...rest];
+      }
+
+      dirToDelta(dir) {
+        if (dir === 'left') return { dx: -1, dy: 0 };
+        if (dir === 'right') return { dx: 1, dy: 0 };
+        if (dir === 'up') return { dx: 0, dy: -1 };
+        return { dx: 0, dy: 1 };
+      }
+
+      isTileWalkableForEnemy(tileX, tileY) {
+        if (tileX < 0 || tileY < 0 || tileX >= GRID_SIZE || tileY >= GRID_SIZE) return false;
+        if (isIndestructibleWall(tileX, tileY)) return false;
+        if (this.blockByTile.has(`${tileX},${tileY}`)) return false;
+
+        // Enemies treat any bomb as solid (even unarmed) to avoid camping it.
+        for (const b of this.activeBombs) {
+          if (!b.exploded && b.tileX === tileX && b.tileY === tileY) return false;
+        }
+
+        // Avoid other enemies
+        for (const other of this.enemies) {
+          if (!other.dead && other.tileX === tileX && other.tileY === tileY) return false;
+        }
+
+        return true;
+      }
+
+      moveEnemyToTile(enemy, tileX, tileY) {
+        enemy.isMoving = true;
+        const to = tileToWorldCenter(tileX, tileY);
+
+        this.tweens.add({
+          targets: [enemy.sprite, enemy.shadow],
+          x: to.x,
+          y: (target) => (target === enemy.shadow ? to.y + 14 : to.y),
+          duration: enemy.moveMs,
+          ease: 'Linear',
+          onComplete: () => {
+            enemy.tileX = tileX;
+            enemy.tileY = tileY;
+            enemy.isMoving = false;
+
+            // Check immediate contact after moving.
+            if (!this.isInvulnerable && enemy.tileX === this.playerTileX && enemy.tileY === this.playerTileY) {
+              this.damagePlayer();
+            }
+          }
+        });
+      }
+
+      preload() {
+        // Stage 1 uses generated textures (placeholders). No external assets required.
+      }
+
+      create() {
+        this.createTextures();
+
+        this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
+
+        // Stage 6 UI overlay
+        if (!this.scene.isActive('UIScene')) {
+          this.scene.launch('UIScene');
+        }
+        this.scene.bringToTop('UIScene');
+
+        this.floorImages = [];
+        for (let y = 0; y < GRID_SIZE; y++) {
+          for (let x = 0; x < GRID_SIZE; x++) {
+            const pos = tileToWorldCenter(x, y);
+            const img = this.add.image(pos.x, pos.y, 'floor');
+            img.setDepth(0);
+            this.floorImages.push(img);
+          }
+        }
+
+        this.walls = this.physics.add.staticGroup();
+        this.blocks = this.physics.add.staticGroup();
+        this.blockByTile = new Map();
+
+        this.bombs = this.physics.add.staticGroup();
+        this.activeBombs = [];
+
+        this.explosions = this.add.group();
+        this.blastRadius = 2;
+
+        this.enemies = [];
+
+        this.powerUps = [];
+        this.powerUpByTile = new Map();
+
+        for (let y = 0; y < GRID_SIZE; y++) {
+          for (let x = 0; x < GRID_SIZE; x++) {
+            const pos = tileToWorldCenter(x, y);
+
+            if (isIndestructibleWall(x, y)) {
+              const wall = this.walls.create(pos.x, pos.y, 'wall');
+              wall.setDepth(2);
+              continue;
+            }
+
+            if (!isSpawnSafe(x, y)) {
+              // Destructible blocks on empty tiles (50% chance)
+              if (Math.random() < 0.5) {
+                const block = this.blocks.create(pos.x, pos.y, 'block');
+                block.setDepth(2);
+                this.blockByTile.set(`${x},${y}`,
+                  { sprite: block, tileX: x, tileY: y }
+                );
+              }
+            }
+          }
+        }
+
+        this.playerTileX = 1;
+        this.playerTileY = 1;
+        const spawn = tileToWorldCenter(this.playerTileX, this.playerTileY);
+
+        this.playerShadow = this.add.image(spawn.x, spawn.y + 14, 'shadow');
+        this.playerShadow.setDepth(2.5);
+
+        // Grid-wise movement: use a regular sprite and move tile-to-tile with tweens.
+        // (Avoids arcade-physics sliding and makes classic Bomberman movement.)
+        this.player = this.add.sprite(spawn.x, spawn.y, 'player');
+        this.player.setDepth(3);
+        this.isMovingTile = false;
+
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.keys = this.input.keyboard.addKeys('W,A,S,D');
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+        // Ensure SPACE is captured by Phaser (avoid browser scrolling / default actions).
+        this.input.keyboard.addCapture('SPACE');
+
+        // Capture WASD as well (avoid host/IDE keybindings stealing key events).
+        this.input.keyboard.addCapture('W,A,S,D');
+
+        // Make sure the canvas can be focused; click/tap the game to focus.
+        const canvas = this.game.canvas;
+        canvas.setAttribute('tabindex', '0');
+        canvas.style.outline = 'none';
+        this.input.on('pointerdown', () => canvas.focus());
+
+        // Expose a global hook so document-level key handlers can call into the active scene.
+        window.__bmPlaceBomb = () => {
+          if (this.scene && this.scene.isActive()) this.tryPlaceBomb();
+        };
+
+        // Fallback: direct keydown event for SPACE.
+        this.input.keyboard.on('keydown-SPACE', (ev) => {
+          if (ev && ev.preventDefault) ev.preventDefault();
+          this.tryPlaceBomb();
+        });
+
+        this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+        this.cameras.main.centerOn(WORLD_W / 2, WORLD_H / 2);
+
+        this.tileMoveMs = 120;
+        this.lastDir = 'down';
+
+        this.maxBombs = 1;
+
+        this.score = 0;
+
+        this.lives = 3;
+        this.isInvulnerable = false;
+        this.emitUiState();
+
+        this.particles = this.add.particles(0, 0, 'particle');
+        this.particles.setDepth(50);
+
+        // Stage 7: Debris manager
+        this.debrisParticles = this.add.particles(0, 0, 'debris-1');
+        this.debrisParticles.setDepth(49);
+
+        this.spawnEnemies();
+
+        // Stage 7: Vignette Overlay
+        this.vignette = this.add.image(WORLD_W / 2, WORLD_H / 2, 'vignette');
+        this.vignette.setDepth(100); // Above most things, below UI
+        this.vignette.setScrollFactor(0); // If we ever scroll
+
+        // Stage 7: Intro Zoom
+        this.cameras.main.setZoom(1.2);
+        this.tweens.add({
+          targets: this.cameras.main,
+          zoom: 1,
+          duration: 800,
+          ease: 'Cubic.easeOut'
+        });
+      }
+
+      update() {
+        const left = (this.cursors.left.isDown || this.keys.A.isDown);
+        const right = (this.cursors.right.isDown || this.keys.D.isDown);
+        const up = (this.cursors.up.isDown || this.keys.W.isDown);
+        const down = (this.cursors.down.isDown || this.keys.S.isDown);
+
+        // Tile movement: accept one direction at a time.
+        if (!this.isMovingTile) {
+          let dx = 0;
+          let dy = 0;
+          if (left) { dx = -1; dy = 0; this.lastDir = 'left'; }
+          else if (right) { dx = 1; dy = 0; this.lastDir = 'right'; }
+          else if (up) { dx = 0; dy = -1; this.lastDir = 'up'; }
+          else if (down) { dx = 0; dy = 1; this.lastDir = 'down'; }
+
+          if (dx !== 0 || dy !== 0) {
+            this.tryMoveByTile(dx, dy);
+          } else {
+            this.player.anims.stop();
+            this.player.setFrame(this.getIdleFrameForDir(this.lastDir));
+          }
+        }
+
+        this.playerShadow.x = this.player.x;
+        this.playerShadow.y = this.player.y + 14;
+
+        // Note: bomb placement is also handled in keydown-SPACE and document keydown for reliability.
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.tryPlaceBomb('space-justdown');
+
+        // Arm bombs after the player steps away from them.
+        for (const b of this.activeBombs) {
+          if (!b.armed) {
+            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, b.sprite.x, b.sprite.y);
+            if (dist > TILE_SIZE * 0.45) {
+              b.armed = true;
+              if (b.sprite.body) {
+                b.sprite.body.checkCollision.none = false;
+              }
+            }
+          }
+        }
+
+        this.updateEnemies();
+      }
+
+      tryMoveByTile(dx, dy) {
+        const nx = this.playerTileX + dx;
+        const ny = this.playerTileY + dy;
+        if (nx < 0 || ny < 0 || nx >= GRID_SIZE || ny >= GRID_SIZE) return;
+        if (!this.isTileWalkable(nx, ny)) return;
+
+        this.isMovingTile = true;
+        const from = tileToWorldCenter(this.playerTileX, this.playerTileY);
+        const to = tileToWorldCenter(nx, ny);
+
+        this.player.anims.play('walk-' + this.lastDir, true);
+
+        this.tweens.add({
+          targets: [this.player, this.playerShadow],
+          x: to.x,
+          y: (target) => (target === this.playerShadow ? to.y + 14 : to.y),
+          duration: this.tileMoveMs,
+          ease: 'Linear',
+          onComplete: () => {
+            this.playerTileX = nx;
+            this.playerTileY = ny;
+            this.isMovingTile = false;
+
+            this.tryCollectPowerUpAt(nx, ny);
+          }
+        });
+      }
+
+      isTileWalkable(tileX, tileY) {
+        if (isIndestructibleWall(tileX, tileY)) return false;
+        if (this.blockByTile.has(`${tileX},${tileY}`)) return false;
+
+        // Bombs are solid once armed; allow stepping off by treating unarmed bomb as non-solid.
+        for (const b of this.activeBombs) {
+          if (!b.exploded && b.tileX === tileX && b.tileY === tileY) {
+            return b.armed === false;
+          }
+        }
+        return true;
+      }
+
+      getIdleFrameForDir(dir) {
+        const idxByDir = { down: 0, left: 4, right: 8, up: 12 };
+        return idxByDir[dir] ?? 0;
+      }
+
+      tryPlaceBomb(source = 'unknown') {
+        const t = { tileX: this.playerTileX, tileY: this.playerTileY };
+        if (isIndestructibleWall(t.tileX, t.tileY)) {
+          this.setDebug(`bomb blocked: wall @ ${t.tileX},${t.tileY} (${source})`);
+          return;
+        }
+        if (isSpawnSafe(t.tileX, t.tileY) === false) {
+          // ok
+        }
+
+        // Enforce max bombs.
+        const activeCount = this.activeBombs.filter(b => b && !b.exploded).length;
+        if (activeCount >= this.maxBombs) {
+          this.setDebug(`bomb blocked: max bombs (${this.maxBombs}) (${source})`);
+          return;
+        }
+
+        // Don't allow bomb on top of another bomb.
+        for (const b of this.activeBombs) {
+          if (!b.exploded && b.tileX === t.tileX && b.tileY === t.tileY) {
+            this.setDebug(`bomb blocked: already bomb @ ${t.tileX},${t.tileY} (${source})`);
+            return;
+          }
+        }
+
+        // Don't allow bomb on top of a destructible block.
+        const pos = tileToWorldCenter(t.tileX, t.tileY);
+        if (this.blockByTile.has(`${t.tileX},${t.tileY}`)) {
+          this.setDebug(`bomb blocked: block @ ${t.tileX},${t.tileY} (${source})`);
+          return;
+        }
+
+        const bombSprite = this.bombs.create(pos.x, pos.y, 'bomb');
+        bombSprite.setDepth(2.8);
+        bombSprite.refreshBody();
+        bombSprite.body.checkCollision.none = true; // allow player to step off
+
+        this.setDebug(`bomb placed @ ${t.tileX},${t.tileY} (${source})`);
+
+        const bomb = {
+          sprite: bombSprite,
+          tileX: t.tileX,
+          tileY: t.tileY,
+          armed: false,
+          exploded: false,
+          glow: null
+        };
+        this.activeBombs.push(bomb);
+
+        // Stage 7: Bomb Glow
+        const glow = this.add.image(pos.x, pos.y + 2, 'soft-glow');
+        glow.setDepth(2.7);
+        glow.setTint(0xff6b4f);
+        glow.setAlpha(0.6);
+        glow.setScale(1.2);
+        bomb.glow = glow;
+
+        this.tweens.add({
+          targets: glow,
+          alpha: 0.2,
+          scale: 1.5,
+          duration: 500,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut'
+        });
+
+        // Fuse animation: subtle pulsing + flicker
+        this.tweens.add({
+          targets: bombSprite,
+          scale: { from: 1, to: 1.08 },
+          duration: 220,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+        this.tweens.add({
+          targets: bombSprite,
+          angle: { from: -2, to: 2 },
+          duration: 90,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+
+        this.time.delayedCall(2400, () => {
+          this.explodeBomb(bomb);
+        });
+      }
+
+      setDebug(msg) {
+        // Debug UI removed; keep method for non-disruptive internal logging if needed later.
+      }
+
+      explodeBomb(bomb) {
+        if (!bomb || bomb.exploded) return;
+        bomb.exploded = true;
+
+        const bombSprite = bomb.sprite;
+        if (bombSprite && bombSprite.active) {
+          this.tweens.killTweensOf(bombSprite);
+          bombSprite.destroy();
+        }
+
+        if (bomb.glow) {
+          this.tweens.killTweensOf(bomb.glow);
+          bomb.glow.destroy();
+        }
+
+        const tiles = this.getExplosionTiles(bomb.tileX, bomb.tileY, this.blastRadius);
+
+        this.cameras.main.shake(120, 0.006);
+
+        for (const t of tiles) {
+          const pos = tileToWorldCenter(t.tileX, t.tileY);
+
+          const exp = this.add.image(pos.x, pos.y, 'explosion');
+          exp.setBlendMode(Phaser.BlendModes.ADD);
+          exp.setDepth(10);
+          this.explosions.add(exp);
+
+          this.tweens.add({
+            targets: exp,
+            alpha: { from: 0.95, to: 0 },
+            scale: { from: 0.9, to: 1.35 },
+            duration: 260,
+            ease: 'Quad.easeOut',
+            onComplete: () => exp.destroy(),
+          });
+
+          this.emitExplosionParticles(pos.x, pos.y);
+
+          if (t.hitBlock) {
+            this.destroyBlockAt(t.tileX, t.tileY);
+          }
+
+          this.killEnemiesAtTile(t.tileX, t.tileY);
+        }
+
+        this.checkPlayerDamage(tiles);
+      }
+
+      killEnemiesAtTile(tileX, tileY) {
+        for (const e of this.enemies) {
+          if (!e || e.dead) continue;
+          if (e.tileX !== tileX || e.tileY !== tileY) continue;
+
+          e.dead = true;
+          e.isMoving = false;
+
+          this.score += 100;
+          this.emitUiState();
+
+          this.emitEnemyDeathParticles(e.sprite.x, e.sprite.y);
+
+          // Quick pop-out
+          this.tweens.add({
+            targets: [e.sprite, e.shadow],
+            alpha: { from: 1, to: 0 },
+            scale: { from: 1, to: 0.6 },
+            duration: 180,
+            ease: 'Quad.easeIn',
+            onComplete: () => {
+              if (e.sprite) e.sprite.destroy();
+              if (e.shadow) e.shadow.destroy();
+            }
+          });
+        }
+      }
+
+      emitEnemyDeathParticles(x, y) {
+        this.particles.emitParticleAt(x, y, {
+          quantity: 16,
+          lifespan: { min: 220, max: 520 },
+          speed: { min: 40, max: 180 },
+          scale: { start: 0.9, end: 0 },
+          alpha: { start: 0.85, end: 0 },
+          tint: [0x7ce6ff, 0xffd36b, 0xffffff],
+          blendMode: 'ADD',
+        });
+
+        this.particles.emitParticleAt(x, y, {
+          quantity: 6,
+          lifespan: { min: 500, max: 950 },
+          speed: { min: 12, max: 60 },
+          scale: { start: 1.1, end: 1.9 },
+          alpha: { start: 0.16, end: 0 },
+          tint: 0x9aa7bd,
+          blendMode: 'NORMAL',
+        });
+      }
+
+      getExplosionTiles(originX, originY, radius) {
+        const out = [];
+        out.push({ tileX: originX, tileY: originY, hitBlock: false });
+
+        const dirs = [
+          { dx: 1, dy: 0 },
+          { dx: -1, dy: 0 },
+          { dx: 0, dy: 1 },
+          { dx: 0, dy: -1 },
+        ];
+
+        for (const d of dirs) {
+          for (let i = 1; i <= radius; i++) {
+            const tx = originX + d.dx * i;
+            const ty = originY + d.dy * i;
+            if (tx < 0 || ty < 0 || tx >= GRID_SIZE || ty >= GRID_SIZE) break;
+            if (isIndestructibleWall(tx, ty)) break;
+
+            const key = `${tx},${ty}`;
+            if (this.blockByTile.has(key)) {
+              out.push({ tileX: tx, tileY: ty, hitBlock: true });
+              break;
+            }
+
+            out.push({ tileX: tx, tileY: ty, hitBlock: false });
+          }
+        }
+
+        return out;
+      }
+
+      destroyBlockAt(tileX, tileY) {
+        const key = `${tileX},${tileY}`;
+        const block = this.blockByTile.get(key);
+        if (!block || !block.sprite || !block.sprite.active) return;
+
+        const s = block.sprite;
+        this.blockByTile.delete(key);
+
+        this.tweens.add({
+          targets: s,
+          x: s.x + Phaser.Math.Between(-3, 3),
+          y: s.y + Phaser.Math.Between(-3, 3),
+          duration: 60,
+          yoyo: true,
+          repeat: 2,
+        });
+
+        this.tweens.add({
+          targets: s,
+          alpha: { from: 1, to: 0 },
+          scale: { from: 1, to: 0.6 },
+          duration: 220,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            s.destroy();
+          },
+        });
+
+        this.score += 10;
+        this.emitUiState();
+
+        // Stage 7: Debris
+        const worldPos = tileToWorldCenter(tileX, tileY);
+        this.emitBlockDebris(worldPos.x, worldPos.y);
+
+        this.maybeSpawnPowerUp(tileX, tileY);
+      }
+
+      emitBlockDebris(x, y) {
+        // Emit main chunks
+        this.debrisParticles.setTexture('debris-1');
+        this.debrisParticles.emitParticleAt(x, y, {
+          speed: { min: 50, max: 150 },
+          angle: { min: 0, max: 360 },
+          scale: { start: 1, end: 0.5 },
+          alpha: { start: 1, end: 0 },
+          lifespan: 600,
+          gravityY: 200,
+          quantity: 4,
+          rotate: { min: 0, max: 360, end: 720 }
+        });
+
+        // Emit smaller bits
+        this.debrisParticles.setTexture('debris-2');
+        this.debrisParticles.emitParticleAt(x, y, {
+          speed: { min: 80, max: 200 },
+          angle: { min: 0, max: 360 },
+          scale: { start: 1, end: 0 },
+          lifespan: 400,
+          gravityY: 100,
+          quantity: 6,
+          rotate: { min: 0, max: 360 }
+        });
+      }
+
+      maybeSpawnPowerUp(tileX, tileY) {
+        // Spawn chance when a destructible block is destroyed.
+        // Total chance ~25%; tweak later.
+        if (this.powerUpByTile.has(`${tileX},${tileY}`)) return;
+        if (Math.random() > 0.25) return;
+
+        // Weighted pick
+        const r = Math.random();
+        let type = 'bomb';
+        if (r < 0.40) type = 'bomb';
+        else if (r < 0.75) type = 'radius';
+        else type = 'speed';
+
+        const pos = tileToWorldCenter(tileX, tileY);
+        const shadow = this.add.image(pos.x, pos.y + 14, 'shadow');
+        shadow.setDepth(2.55);
+
+        const key = type === 'bomb' ? 'powerup-bomb' : type === 'radius' ? 'powerup-radius' : 'powerup-speed';
+        const sprite = this.add.image(pos.x, pos.y, key);
+        sprite.setDepth(3.1);
+
+        const powerUp = { type, tileX, tileY, sprite, shadow };
+        this.powerUps.push(powerUp);
+        this.powerUpByTile.set(`${tileX},${tileY}`, powerUp);
+
+        // Float + glow
+        this.tweens.add({
+          targets: sprite,
+          y: { from: pos.y - 2, to: pos.y + 2 },
+          duration: 700,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+        this.tweens.add({
+          targets: sprite,
+          alpha: { from: 0.95, to: 1 },
+          duration: 520,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      }
+
+      tryCollectPowerUpAt(tileX, tileY) {
+        const key = `${tileX},${tileY}`;
+        const p = this.powerUpByTile.get(key);
+        if (!p) return;
+
+        this.applyPowerUp(p.type);
+        this.powerUpByTile.delete(key);
+
+        this.score += 25;
+        this.emitUiState();
+
+        // Pickup fx
+        this.particles.emitParticleAt(p.sprite.x, p.sprite.y, {
+          quantity: 10,
+          lifespan: { min: 180, max: 420 },
+          speed: { min: 30, max: 140 },
+          scale: { start: 0.8, end: 0 },
+          alpha: { start: 0.85, end: 0 },
+          tint: [0xffffff, 0xffd36b, 0x7ce6ff],
+          blendMode: 'ADD',
+        });
+
+        this.tweens.killTweensOf(p.sprite);
+        this.tweens.add({
+          targets: [p.sprite, p.shadow],
+          alpha: { from: 1, to: 0 },
+          scale: { from: 1, to: 0.6 },
+          duration: 160,
+          onComplete: () => {
+            p.sprite.destroy();
+            p.shadow.destroy();
+          }
+        });
+      }
+
+      applyPowerUp(type) {
+        if (type === 'bomb') {
+          this.maxBombs = Math.min(6, this.maxBombs + 1);
+        } else if (type === 'radius') {
+          this.blastRadius = Math.min(8, this.blastRadius + 1);
+        } else if (type === 'speed') {
+          // Faster tile movement = lower ms per tile.
+          this.tileMoveMs = Math.max(65, this.tileMoveMs - 10);
+        }
+        this.emitUiState();
+      }
+
+      checkPlayerDamage(explosionTiles) {
+        if (this.isInvulnerable) return;
+        const p = { tileX: this.playerTileX, tileY: this.playerTileY };
+        for (const t of explosionTiles) {
+          if (t.tileX === p.tileX && t.tileY === p.tileY) {
+            this.damagePlayer();
+            return;
+          }
+        }
+      }
+
+      damagePlayer() {
+        if (this.isInvulnerable) return;
+        this.lives = Math.max(0, this.lives - 1);
+        this.emitUiState();
+
+        this.isInvulnerable = true;
+        this.cameras.main.shake(180, 0.012);
+
+        this.tweens.add({
+          targets: this.player,
+          alpha: { from: 1, to: 0.2 },
+          duration: 90,
+          yoyo: true,
+          repeat: 8,
+          onComplete: () => {
+            this.player.alpha = 1;
+            this.isInvulnerable = false;
+          },
+        });
+
+        // Stage 7: Player Damage Particles (Bits of the player suit)
+        this.debrisParticles.setTexture('debris-2'); // reuse small square
+        this.debrisParticles.emitParticleAt(this.player.x, this.player.y, {
+          speed: { min: 60, max: 200 },
+          scale: { start: 1.2, end: 0.5 },
+          lifespan: 500,
+          quantity: 12,
+          tint: [0x3ee6a8, 0xffffff], // Player colors
+          blendMode: 'ADD'
+        });
+
+        if (this.lives <= 0) {
+          const spawn = tileToWorldCenter(1, 1);
+          this.player.setPosition(spawn.x, spawn.y);
+          this.lives = 3;
+          this.emitUiState();
+        }
+      }
+
+      emitUiState() {
+        if (!this.game || !this.game.events) return;
+        this.game.events.emit('ui:update', {
+          lives: this.lives,
+          score: this.score,
+          maxBombs: this.maxBombs,
+          blastRadius: this.blastRadius,
+          speed: Math.round(1000 / this.tileMoveMs),
+        });
+      }
+
+      emitExplosionParticles(x, y) {
+        // Fire/sparks burst
+        this.particles.emitParticleAt(x, y, {
+          quantity: 14,
+          lifespan: { min: 180, max: 420 },
+          speed: { min: 40, max: 170 },
+          scale: { start: 0.8, end: 0 },
+          alpha: { start: 0.9, end: 0 },
+          tint: [0xffd36b, 0xff6b4f, 0xffffff],
+          blendMode: 'ADD',
+        });
+
+        // Smoke puff
+        this.particles.emitParticleAt(x, y, {
+          quantity: 6,
+          lifespan: { min: 500, max: 900 },
+          speed: { min: 15, max: 55 },
+          scale: { start: 1.1, end: 1.8 },
+          alpha: { start: 0.18, end: 0 },
+          tint: 0x9aa7bd,
+          blendMode: 'NORMAL',
+        });
+      }
+
+      createTextures() {
+        // Floor
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0x162033, 1);
+          g.fillRoundedRect(0, 0, TILE_SIZE, TILE_SIZE, 6);
+          g.fillStyle(0x1f2d47, 1);
+          g.fillRoundedRect(4, 4, TILE_SIZE - 8, TILE_SIZE - 8, 6);
+          g.fillStyle(0x0b0f1a, 0.25);
+          g.fillRect(0, TILE_SIZE - 6, TILE_SIZE, 6);
+          g.generateTexture('floor', TILE_SIZE, TILE_SIZE);
+          g.destroy();
+        }
+
+        // Indestructible Wall
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0x3e4f73, 1);
+          g.fillRoundedRect(0, 0, TILE_SIZE, TILE_SIZE, 8);
+          g.fillStyle(0x556a93, 1);
+          g.fillRoundedRect(4, 4, TILE_SIZE - 8, TILE_SIZE - 10, 8);
+          g.fillStyle(0x0b0f1a, 0.35);
+          g.fillRect(0, TILE_SIZE - 8, TILE_SIZE, 8);
+          g.lineStyle(2, 0x6f86b0, 0.55);
+          g.strokeRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 8);
+          g.generateTexture('wall', TILE_SIZE, TILE_SIZE);
+          g.destroy();
+        }
+
+        // Destructible Block
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0x8a5a3c, 1);
+          g.fillRoundedRect(0, 0, TILE_SIZE, TILE_SIZE, 8);
+          g.fillStyle(0xb3784f, 1);
+          g.fillRoundedRect(5, 5, TILE_SIZE - 10, TILE_SIZE - 12, 8);
+          g.fillStyle(0x0b0f1a, 0.35);
+          g.fillRect(0, TILE_SIZE - 8, TILE_SIZE, 8);
+          g.lineStyle(2, 0xe2b37c, 0.35);
+          g.strokeRoundedRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4, 8);
+          g.generateTexture('block', TILE_SIZE, TILE_SIZE);
+          g.destroy();
+        }
+
+        // Player placeholder
+        {
+          // Generate a simple 4x4 spritesheet (16 frames): 4 frames per direction.
+          // Frame order: down(0-3), left(4-7), right(8-11), up(12-15)
+          const size = TILE_SIZE;
+          const sheetKey = 'player-sheet';
+          const tex = this.textures.createCanvas(sheetKey, size * 4, size * 4);
+          const ctx = tex.getContext();
+          ctx.clearRect(0, 0, size * 4, size * 4);
+
+          const dirColors = {
+            down: { main: '#3ee6a8', edge: 'rgba(182,255,231,0.75)' },
+            left: { main: '#4fd0ff', edge: 'rgba(190,240,255,0.75)' },
+            right: { main: '#ffb84f', edge: 'rgba(255,236,190,0.75)' },
+            up: { main: '#d36bff', edge: 'rgba(245,210,255,0.75)' },
+          };
+
+          function drawFrame(frameX, frameY, main, edge, step) {
+            const ox = frameX * size;
+            const oy = frameY * size;
+
+            // Clear frame
+            ctx.clearRect(ox, oy, size, size);
+
+            // Body
+            const cx = ox + size / 2;
+            const cy = oy + size / 2 - 2;
+
+            // Fake "walk" by shifting feet subtly per frame
+            const wobble = (step === 1 ? -2 : step === 3 ? 2 : 0);
+            const bob = (step === 2 ? 1 : 0);
+
+            ctx.fillStyle = main;
+            roundRect(ctx, cx - 14 + wobble, cy - 16 + bob, 28, 28, 10);
+            ctx.fill();
+
+            ctx.strokeStyle = edge;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Simple visor/face
+            ctx.fillStyle = 'rgba(11,15,26,0.35)';
+            ctx.fillRect(cx - 8 + wobble, cy - 6 + bob, 16, 6);
+          }
+
+          function roundRect(context, x, y, w, h, r) {
+            const rr = Math.min(r, w / 2, h / 2);
+            context.beginPath();
+            context.moveTo(x + rr, y);
+            context.arcTo(x + w, y, x + w, y + h, rr);
+            context.arcTo(x + w, y + h, x, y + h, rr);
+            context.arcTo(x, y + h, x, y, rr);
+            context.arcTo(x, y, x + w, y, rr);
+            context.closePath();
+          }
+
+          // Build frames
+          const dirs = ['down', 'left', 'right', 'up'];
+          dirs.forEach((dir, row) => {
+            const c = dirColors[dir];
+            for (let col = 0; col < 4; col++) {
+              drawFrame(col, row, c.main, c.edge, col);
+            }
+          });
+
+          tex.refresh();
+
+          this.textures.addSpriteSheet('player', tex.getSourceImage(), { frameWidth: size, frameHeight: size });
+          this.textures.remove(sheetKey);
+
+          // Animations
+          this.anims.create({ key: 'walk-down', frames: this.anims.generateFrameNumbers('player', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
+          this.anims.create({ key: 'walk-left', frames: this.anims.generateFrameNumbers('player', { start: 4, end: 7 }), frameRate: 10, repeat: -1 });
+          this.anims.create({ key: 'walk-right', frames: this.anims.generateFrameNumbers('player', { start: 8, end: 11 }), frameRate: 10, repeat: -1 });
+          this.anims.create({ key: 'walk-up', frames: this.anims.generateFrameNumbers('player', { start: 12, end: 15 }), frameRate: 10, repeat: -1 });
+        }
+
+        // Enemy placeholder (simple looping idle)
+        {
+          const size = TILE_SIZE;
+          const sheetKey = 'enemy-sheet';
+          const tex = this.textures.createCanvas(sheetKey, size * 4, size);
+          const ctx = tex.getContext();
+          ctx.clearRect(0, 0, size * 4, size);
+
+          function roundRect(context, x, y, w, h, r) {
+            const rr = Math.min(r, w / 2, h / 2);
+            context.beginPath();
+            context.moveTo(x + rr, y);
+            context.arcTo(x + w, y, x + w, y + h, rr);
+            context.arcTo(x + w, y + h, x, y + h, rr);
+            context.arcTo(x, y + h, x, y, rr);
+            context.arcTo(x, y, x + w, y, rr);
+            context.closePath();
+          }
+
+          for (let i = 0; i < 4; i++) {
+            const ox = i * size;
+            const cx = ox + size / 2;
+            const cy = size / 2 - 2;
+            const bob = (i === 1 ? 1 : i === 3 ? -1 : 0);
+            const glow = (i === 2 ? 0.85 : 0.65);
+
+            ctx.clearRect(ox, 0, size, size);
+            ctx.fillStyle = `rgba(0,0,0,0.22)`;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy + 28, 14, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#ff4f7e';
+            roundRect(ctx, cx - 14, cy - 16 + bob, 28, 28, 10);
+            ctx.fill();
+
+            ctx.strokeStyle = `rgba(255,230,240,${glow})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(11,15,26,0.35)';
+            ctx.fillRect(cx - 8, cy - 6 + bob, 16, 6);
+          }
+
+          tex.refresh();
+          this.textures.addSpriteSheet('enemy', tex.getSourceImage(), { frameWidth: size, frameHeight: size });
+          this.textures.remove(sheetKey);
+
+          this.anims.create({
+            key: 'enemy-idle',
+            frames: this.anims.generateFrameNumbers('enemy', { start: 0, end: 3 }),
+            frameRate: 6,
+            repeat: -1,
+          });
+        }
+
+        // Shadow texture (reused for player / later enemies)
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0x000000, 0.25);
+          g.fillEllipse(TILE_SIZE / 2, TILE_SIZE / 2, 30, 16);
+          g.generateTexture('shadow', TILE_SIZE, TILE_SIZE);
+          g.destroy();
+        }
+
+        // Bomb texture
+        {
+          const size = TILE_SIZE;
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0x0b0f1a, 0.22);
+          g.fillEllipse(size / 2, size / 2 + 14, 30, 16);
+          g.fillStyle(0x2b2f3a, 1);
+          g.fillCircle(size / 2, size / 2 + 2, 14);
+          g.fillStyle(0x495062, 1);
+          g.fillCircle(size / 2 - 3, size / 2 - 1, 10);
+          g.lineStyle(2, 0xcfd6e6, 0.35);
+          g.strokeCircle(size / 2, size / 2 + 2, 14);
+          // fuse
+          g.lineStyle(3, 0xffc04d, 1);
+          g.beginPath();
+          g.moveTo(size / 2 + 8, size / 2 - 10);
+          g.lineTo(size / 2 + 16, size / 2 - 16);
+          g.strokePath();
+          g.fillStyle(0xff6b4f, 1);
+          g.fillCircle(size / 2 + 16, size / 2 - 16, 3);
+          g.generateTexture('bomb', size, size);
+          g.destroy();
+        }
+
+        // Explosion texture
+        {
+          const size = TILE_SIZE;
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0xffd36b, 0.9);
+          g.fillCircle(size / 2, size / 2, 10);
+          g.fillStyle(0xff6b4f, 0.75);
+          g.fillCircle(size / 2, size / 2, 16);
+          g.fillStyle(0xffffff, 0.65);
+          g.fillCircle(size / 2, size / 2, 6);
+          g.generateTexture('explosion', size, size);
+          g.destroy();
+        }
+
+        // Particle texture
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0xffffff, 1);
+          g.fillCircle(4, 4, 4);
+          g.generateTexture('particle', 8, 8);
+          g.destroy();
+        }
+
+        // Power-up textures
+        {
+          const size = TILE_SIZE;
+
+          const makeIcon = (key, base, accent, glyph) => {
+            const g = this.make.graphics({ x: 0, y: 0, add: false });
+            g.fillStyle(0x000000, 0.22);
+            g.fillEllipse(size / 2, size / 2 + 14, 26, 14);
+
+            g.fillStyle(base, 1);
+            g.fillRoundedRect(size / 2 - 14, size / 2 - 16, 28, 28, 10);
+            g.lineStyle(2, accent, 0.8);
+            g.strokeRoundedRect(size / 2 - 14, size / 2 - 16, 28, 28, 10);
+
+            g.fillStyle(accent, 1);
+            if (glyph === 'B') {
+              g.fillCircle(size / 2, size / 2 - 2, 7);
+              g.lineStyle(3, accent, 1);
+              g.beginPath();
+              g.moveTo(size / 2 + 6, size / 2 - 10);
+              g.lineTo(size / 2 + 12, size / 2 - 14);
+              g.strokePath();
+            } else if (glyph === 'R') {
+              g.fillCircle(size / 2, size / 2 - 2, 9);
+              g.lineStyle(2, 0xffffff, 0.8);
+              g.strokeCircle(size / 2, size / 2 - 2, 12);
+            } else if (glyph === 'S') {
+              g.lineStyle(4, accent, 1);
+              g.beginPath();
+              g.moveTo(size / 2 - 6, size / 2 + 6);
+              g.lineTo(size / 2 + 8, size / 2 - 8);
+              g.strokePath();
+              g.fillStyle(0xffffff, 0.9);
+              g.fillCircle(size / 2 + 8, size / 2 - 8, 3);
+            }
+
+            g.generateTexture(key, size, size);
+            g.destroy();
+          };
+
+          makeIcon('powerup-bomb', 0x1f2d47, 0xffd36b, 'B');
+          makeIcon('powerup-radius', 0x223a2a, 0x7ce6ff, 'R');
+          makeIcon('powerup-speed', 0x2e1f47, 0xff6b4f, 'S');
+        }
+
+        // Stage 7: Debris Particles (Block fragments)
+        {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+          g.fillStyle(0xb3784f, 1);
+          g.beginPath();
+          g.moveTo(0, 0);
+          g.lineTo(6, 2);
+          g.lineTo(4, 7);
+          g.lineTo(0, 5);
+          g.closePath();
+          g.fill();
+          g.generateTexture('debris-1', 8, 8);
+          g.clear();
+          g.fillStyle(0x8a5a3c, 1);
+          g.fillRect(0, 0, 5, 5);
+          g.generateTexture('debris-2', 6, 6);
+          g.destroy();
+        }
+
+        // Stage 7: Soft Glow (for bombs/powerups)
+        {
+          const size = 64;
+          const canvas = this.textures.createCanvas('soft-glow', size, size);
+          const ctx = canvas.getContext();
+          const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+          grad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+          grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.1)');
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, size, size);
+          canvas.refresh();
+        }
+
+        // Stage 7: Vignette (Atmosphere)
+        {
+          const w = WORLD_W;
+          const h = WORLD_H;
+          const canvas = this.textures.createCanvas('vignette', w, h);
+          const ctx = canvas.getContext();
+          const grad = ctx.createRadialGradient(w / 2, h / 2, w * 0.35, w / 2, h / 2, w * 0.85);
+          grad.addColorStop(0, 'rgba(0,0,0,0)');
+          grad.addColorStop(1, 'rgba(0,2,10,0.6)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, w, h);
+          canvas.refresh();
+        }
+      }
+    }
+
+    class UIScene extends Phaser.Scene {
+      constructor() {
+        super({ key: 'UIScene' });
+      }
+
+      create() {
+        this.score = 0;
+        this.lives = 3;
+        this.maxBombs = 1;
+        this.blastRadius = 2;
+        this.speed = 0;
+
+        this.panel = this.add.rectangle(10, 10, 520, 52, 0x0b0f1a, 0.72).setOrigin(0, 0);
+        this.panel.setStrokeStyle(1, 0xeaf2ff, 0.12);
+
+        this.scoreText = this.add.text(18, 16, 'Score: 0', { fontSize: '14px', color: '#eaf2ff', fontStyle: '800' });
+        this.livesText = this.add.text(18, 36, 'Lives: 3', { fontSize: '12px', color: '#cfe0ff', fontStyle: '600' });
+
+        // Ability icons + values
+        this.iconBomb = this.add.image(120, 38, 'powerup-bomb').setScale(0.45).setAlpha(0.95);
+        this.iconRadius = this.add.image(210, 38, 'powerup-radius').setScale(0.45).setAlpha(0.95);
+        this.iconSpeed = this.add.image(310, 38, 'powerup-speed').setScale(0.45).setAlpha(0.95);
+        this.statsText = this.add.text(140, 36, '1     2     0', { fontSize: '12px', color: '#cfe0ff', fontStyle: '800' });
+
+        // Restart button directly under the panel so it is always visible.
+        this.restartBtnBg = this.add.rectangle(10, 66, 110, 32, 0xffd36b, 1).setOrigin(0, 0);
+        this.restartBtnBg.setStrokeStyle(1, 0xffffff, 0.28);
+        this.restartBtnText = this.add.text(10 + 55, 66 + 7, 'Restart', { fontSize: '12px', color: '#0b0f1a', fontStyle: '900' }).setOrigin(0.5, 0);
+
+        this.restartBtnBg.setInteractive({ useHandCursor: true });
+        this.restartBtnBg.on('pointerdown', () => this.restartGame());
+
+        // Keep UI fixed to camera.
+        this.cameras.main.setScroll(0, 0);
+
+        this._uiHandler = (payload) => this.applyUi(payload);
+        this.game.events.on('ui:update', this._uiHandler);
+
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+          if (this._uiHandler) this.game.events.off('ui:update', this._uiHandler);
+        });
+
+        // Pull initial state if GameScene already exists.
+        const gs = this.scene.get('GameScene');
+        if (gs && gs.emitUiState) gs.emitUiState();
+      }
+
+      applyUi(payload) {
+        const prevScore = this.score;
+        const prevLives = this.lives;
+
+        this.score = payload.score ?? this.score;
+        this.lives = payload.lives ?? this.lives;
+        this.maxBombs = payload.maxBombs ?? this.maxBombs;
+        this.blastRadius = payload.blastRadius ?? this.blastRadius;
+        this.speed = payload.speed ?? this.speed;
+
+        this.scoreText.setText(`Score: ${this.score}`);
+        this.livesText.setText(`Lives: ${this.lives}`);
+        this.statsText.setText(`${this.maxBombs}     ${this.blastRadius}     ${this.speed}`);
+
+        if (this.score !== prevScore) {
+          this.tweens.add({ targets: this.scoreText, scaleX: 1.15, scaleY: 1.15, duration: 90, yoyo: true });
+        }
+        if (this.lives !== prevLives) {
+          this.tweens.add({ targets: [this.livesText, this.panel], alpha: { from: 1, to: 0.6 }, duration: 90, yoyo: true, repeat: 2 });
+        }
+      }
+
+      restartGame() {
+        // Restart gameplay and reset UI values.
+        this.score = 0;
+        this.lives = 3;
+        this.maxBombs = 1;
+        this.blastRadius = 2;
+        this.speed = 0;
+        this.applyUi({ score: 0, lives: 3, maxBombs: 1, blastRadius: 2, speed: 0 });
+
+        if (this.scene.isActive('GameScene')) this.scene.stop('GameScene');
+        this.scene.start('GameScene');
+        this.scene.bringToTop('UIScene');
+      }
+    }
+
+    function getGameParentSize() {
+      const el = document.getElementById('game-container');
+      const rect = el.getBoundingClientRect();
+      return { width: Math.max(1, Math.floor(rect.width)), height: Math.max(1, Math.floor(rect.height)) };
+    }
+
+    const initialSize = getGameParentSize();
+
+    const config = {
+      type: Phaser.AUTO,
+      parent: 'game-container',
+      backgroundColor: '#000000',
+      physics: {
+        default: 'arcade',
+        arcade: {
+          gravity: { y: 0 },
+          debug: false,
+        },
+      },
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: WORLD_W,
+        height: WORLD_H,
+      },
+      scene: [GameScene, UIScene],
+    };
+
+    const game = new Phaser.Game(config);
+
+    // Prevent page scrolling when SPACE is pressed (some browsers still scroll even if Phaser captures).
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') e.preventDefault();
+    }, { passive: false });
+
+    // Document-level SPACE fallback (helps when embedded previews/IDEs swallow key events).
+    document.addEventListener('keydown', (e) => {
+      const isSpace = (e.code === 'Space') || (e.key === ' ') || (e.key === 'Spacebar');
+      if (!isSpace) return;
+      e.preventDefault();
+      if (typeof window.__bmPlaceBomb === 'function') window.__bmPlaceBomb();
+    }, { passive: false });
+
+    function handleResize() {
+      // Phaser FIT will re-fit into the parent automatically, but it needs a scale refresh.
+      if (!game || !game.scale) return;
+      game.scale.refresh();
+    }
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+  </script>
+</body>
+
+</html>
