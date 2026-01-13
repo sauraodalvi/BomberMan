@@ -165,6 +165,28 @@
       transform: scale(0.95);
     }
 
+    #m-detonate {
+      width: 56px;
+      height: 56px;
+      background: #2a0a3a;
+      border: 2px solid #d67cff;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      touch-action: manipulation;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    #m-detonate:active,
+    #m-detonate.active {
+      background: #4a1a6a;
+      transform: scale(0.95);
+    }
+
     /* Swap Button */
     #swap-btn {
       width: 32px;
@@ -227,7 +249,10 @@
           <div id="btn-d" class="d-btn" data-key="down">▼</div>
         </div>
         <div id="swap-btn" title="Swap Controls">⇄</div>
-        <div id="m-bomb" data-key="bomb" role="button">💣</div>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <div id="m-detonate" data-key="detonate" role="button" style="display:none;">📡</div>
+          <div id="m-bomb" data-key="bomb" role="button">💣</div>
+        </div>
       </div>
     </div>
     <div id="ad-right" class="ad-slot">Right Ad (200px)</div>
@@ -375,6 +400,14 @@
           sprite.setDepth(3);
           sprite.play('enemy-idle');
 
+          // Ghost Logic (Level 2+)
+          let type = 'normal';
+          if (this.level >= 2 && Math.random() < 0.4) {
+            type = 'ghost';
+            sprite.setTint(0x00ffff); // Cyan
+            sprite.setAlpha(0.85);
+          }
+
           this.enemies.push({
             sprite,
             shadow,
@@ -384,6 +417,7 @@
             dir: Phaser.Math.RND.pick(['left', 'right', 'up', 'down']),
             dead: false,
             moveMs: speedBase + Phaser.Math.Between(0, 20),
+            type: type
           });
         }
       }
@@ -410,7 +444,7 @@
             const d = this.dirToDelta(dir);
             const nx = e.tileX + d.dx;
             const ny = e.tileY + d.dy;
-            if (this.isTileWalkableForEnemy(nx, ny)) {
+            if (this.isTileWalkableForEnemy(nx, ny, e)) {
               e.dir = dir;
               this.moveEnemyToTile(e, nx, ny);
               moved = true;
@@ -439,10 +473,16 @@
         return { dx: 0, dy: 1 };
       }
 
-      isTileWalkableForEnemy(tileX, tileY) {
+      isTileWalkableForEnemy(tileX, tileY, enemy) {
         if (tileX < 0 || tileY < 0 || tileX >= GRID_SIZE || tileY >= GRID_SIZE) return false;
         if (isIndestructibleWall(tileX, tileY)) return false;
-        if (this.blockByTile.has(`${tileX},${tileY}`)) return false;
+
+        // Ghost Enemy passes through soft blocks
+        if (enemy && enemy.type === 'ghost') {
+          // Can pass block
+        } else {
+          if (this.blockByTile.has(`${tileX},${tileY}`)) return false;
+        }
 
         // Enemies treat any bomb as solid (even unarmed) to avoid camping it.
         for (const b of this.activeBombs) {
@@ -570,6 +610,12 @@
         this.maxBombsP1 = this.savedStats ? this.savedStats.bombs : 1;
         this.blastRadiusP1 = this.savedStats ? this.savedStats.radius : 2;
         this.speedMsP1 = this.savedStats ? this.savedStats.speed : 120;
+        this.speedMsP1 = this.savedStats ? this.savedStats.speed : 120;
+        this.hasRemoteP1 = this.savedStats ? this.savedStats.remote : false;
+
+        const dBtn = document.getElementById('m-detonate');
+        if (dBtn) dBtn.style.display = this.hasRemoteP1 ? 'flex' : 'none';
+
         this.levelComplete = false;
 
         // Level Announce
@@ -609,13 +655,14 @@
         });
 
         // Virtual Keys (for Mobile / Touch)
-        this.virtualKeys = { up: false, down: false, left: false, right: false, bomb: false };
+        this.virtualKeys = { up: false, down: false, left: false, right: false, bomb: false, detonate: false };
         window.updateBmInput = (k, v) => { if (this.virtualKeys) this.virtualKeys[k] = v; };
 
-        const inputKeys = this.input.keyboard.addKeys('W,A,S,D,SPACE,ENTER');
+        const inputKeys = this.input.keyboard.addKeys('W,A,S,D,SPACE,ENTER,E');
         this.keys = inputKeys;
         this.spaceKey = inputKeys.SPACE;
         this.enterKey = inputKeys.ENTER;
+        this.keyE = inputKeys.E;
 
         // Explicitly capture keys to prevent browser scrolling
         this.input.keyboard.addCapture([
@@ -682,6 +729,11 @@
         // --- PLAYER 1 (WASD + Space) ---
         if (this.livesP1 > 0) {
           this.handlePlayerInput(this.player, 'p1', this.keys.W, this.keys.A, this.keys.S, this.keys.D, this.spaceKey);
+          // Detonate Check
+          if ((Phaser.Input.Keyboard.JustDown(this.keyE) || this.virtualKeys.detonate) && this.hasRemoteP1) {
+            this.detonateRemoteBomb('p1');
+            this.virtualKeys.detonate = false; // Reset virtual press
+          }
           this.playerShadow.x = this.player.x;
           this.playerShadow.y = this.player.y + 14;
         } else {
@@ -870,7 +922,20 @@
         this.tweens.add({ targets: bombSprite, scale: { from: 1, to: 1.08 }, duration: 220, yoyo: true, repeat: -1 });
 
         const fuseTime = bomb.customFuse || 2400;
-        this.time.delayedCall(fuseTime, () => this.explodeBomb(bomb));
+
+        // Remote Logic: If player has remote, NO auto-explode (unless customUnfairFuse override)
+        if (pid === 'p1' && this.hasRemoteP1 && !bomb.customFuse) {
+          bomb.isRemote = true;
+          bomb.sprite.setTint(0xd67cff); // Purple tint for remote bombs
+        } else {
+          this.time.delayedCall(fuseTime, () => this.explodeBomb(bomb));
+        }
+      }
+
+      detonateRemoteBomb(pid) {
+        // Explode the oldest active remote bomb owned by this player
+        const b = this.activeBombs.find(x => x && !x.exploded && x.owner === pid && x.isRemote);
+        if (b) this.explodeBomb(b);
       }
 
       explodeBomb(bomb) {
@@ -915,6 +980,14 @@
             this.destroyBlockAt(t.tileX, t.tileY);
           }
           this.killEnemiesAtTile(t.tileX, t.tileY);
+
+          // Chain Reaction: Check for other bombs
+          for (const otherB of this.activeBombs) {
+            if (!otherB.exploded && otherB.tileX === t.tileX && otherB.tileY === t.tileY) {
+              // Slight delay for visual ripple effect
+              this.time.delayedCall(100, () => this.explodeBomb(otherB));
+            }
+          }
         }
 
         this.checkPlayerDamage(tiles);
@@ -951,7 +1024,7 @@
         this.time.delayedCall(2000, () => {
           this.scene.restart({
             level: this.level + 1,
-            stats: { lives: this.livesP1, bombs: this.maxBombsP1, radius: this.blastRadiusP1, speed: this.speedMsP1 },
+            stats: { lives: this.livesP1, bombs: this.maxBombsP1, radius: this.blastRadiusP1, speed: this.speedMsP1, remote: this.hasRemoteP1 },
             localMp: false
           });
         });
@@ -1028,13 +1101,14 @@
         let type = 'bomb';
         if (r < 0.40) type = 'bomb';
         else if (r < 0.70) type = 'radius';
-        else type = 'speed';
+        else if (r < 0.90) type = 'speed';
+        else type = 'remote';
 
         const pos = tileToWorldCenter(tileX, tileY);
         const shadow = this.add.image(pos.x, pos.y + 14, 'shadow');
         shadow.setDepth(2.55);
 
-        const key = type === 'bomb' ? 'powerup-bomb' : type === 'radius' ? 'powerup-radius' : 'powerup-speed';
+        const key = type === 'bomb' ? 'powerup-bomb' : type === 'radius' ? 'powerup-radius' : type === 'speed' ? 'powerup-speed' : 'powerup-remote';
         const sprite = this.add.image(pos.x, pos.y, key);
         sprite.setDepth(3.1);
 
@@ -1077,6 +1151,12 @@
           if (type === 'bomb') this.maxBombsP1++;
           else if (type === 'radius') this.blastRadiusP1++;
           else if (type === 'speed') this.speedMsP1 = Math.max(65, this.speedMsP1 - 10);
+          else if (type === 'remote') {
+            this.hasRemoteP1 = true;
+            this.showToast("REMOTE ACQUIRED! Press 'E'");
+            const btn = document.getElementById('m-detonate');
+            if (btn) btn.style.display = 'flex';
+          }
         } else {
           if (type === 'bomb') this.maxBombsP2++;
           else if (type === 'radius') this.blastRadiusP2++;
@@ -1567,6 +1647,7 @@
           createEmojiIcon('powerup-bomb', '#2a2a00', '#ffd36b', '💣');
           createEmojiIcon('powerup-radius', '#002a3a', '#7ce6ff', '💥');
           createEmojiIcon('powerup-speed', '#3a1000', '#ff6b4f', '👟');
+          createEmojiIcon('powerup-remote', '#2a0a3a', '#d67cff', '📡');
         }
 
         if (!this.textures.exists('debris-1')) {
