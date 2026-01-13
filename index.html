@@ -367,6 +367,12 @@
         // Disable enemies in multiplayer (PvP focus)
         if (this.localMp) return;
 
+        // Boss Level Check (Every 5 levels)
+        if (this.level % 5 === 0 && this.level > 0) {
+          this.spawnBoss();
+          return;
+        }
+
         // Spawn 2-4 enemies in safe corners (not overlapping player).
         const corners = [
           { x: GRID_SIZE - 2, y: 1 },
@@ -417,9 +423,38 @@
             dir: Phaser.Math.RND.pick(['left', 'right', 'up', 'down']),
             dead: false,
             moveMs: speedBase + Phaser.Math.Between(0, 20),
-            type: type
+            type: type,
+            hp: 1
           });
         }
+      }
+
+      spawnBoss() {
+        const pos = tileToWorldCenter(GRID_SIZE - 2, GRID_SIZE - 2);
+
+        const shadow = this.add.image(pos.x, pos.y + 20, 'shadow').setScale(2);
+        shadow.setDepth(2.5);
+
+        const sprite = this.add.sprite(pos.x, pos.y, 'boss-bull');
+        sprite.setDepth(3.5);
+        sprite.setScale(1.5); // Huge
+
+        this.enemies.push({
+          sprite, shadow,
+          tileX: GRID_SIZE - 2,
+          tileY: GRID_SIZE - 2,
+          isMoving: false,
+          dir: 'left',
+          dead: false,
+          moveMs: 180, // Slow start
+          type: 'boss',
+          hp: 5,
+          isBoss: true
+        });
+
+        // Boss Intro text
+        const t = this.add.text(WORLD_W / 2, WORLD_H / 2, "WARNING: BOSS APPROACHING", { fontSize: '20px', color: '#f00', fontStyle: '900', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
+        this.tweens.add({ targets: t, alpha: 0, duration: 3000, onComplete: () => t.destroy() });
       }
 
       updateEnemies() {
@@ -444,6 +479,13 @@
             const d = this.dirToDelta(dir);
             const nx = e.tileX + d.dx;
             const ny = e.tileY + d.dy;
+
+            // Boss Wall Smash Logic
+            if (e.isBoss && this.blockByTile.has(`${nx},${ny}`)) {
+              this.destroyBlockAt(nx, ny);
+              this.cameras.main.shake(50, 0.002); // Stomp effect
+            }
+
             if (this.isTileWalkableForEnemy(nx, ny, e)) {
               e.dir = dir;
               this.moveEnemyToTile(e, nx, ny);
@@ -1000,6 +1042,39 @@
 
           e.dead = true;
           e.isMoving = false;
+
+          if (e.isBoss) {
+            e.hp--;
+            if (e.hp > 0) {
+              e.dead = false; // Not dead yet!
+              e.isMoving = false; // Brief stun
+              e.sprite.setTint(0xff0000); // Angry red
+              this.tweens.add({
+                targets: e.sprite,
+                alpha: 0.2, duration: 100, yoyo: true, repeat: 3,
+                onComplete: () => {
+                  e.isMoving = false;
+                  if (e.hp <= 2) { e.moveMs = 80; e.sprite.setTint(0xff5555); } // Rage Mode
+                  else e.sprite.clearTint();
+                }
+              });
+              // Stun delay
+              this.time.delayedCall(400, () => { if (e.hp > 0) e.dead = false; });
+              return; // Don't destroy
+            }
+            // Boss Death
+            this.score += 5000;
+            this.showToast("BOSS DEFEATED!");
+            this.emitEnemyDeathParticles(e.sprite.x, e.sprite.y);
+            // Drop Remote
+            this.maybeSpawnPowerUp(e.tileX, e.tileY, 'remote');
+            e.sprite.destroy();
+            e.shadow.destroy();
+            // Win Level immediately
+            this.winLevel();
+            return;
+          }
+
           this.score += 100;
           this.emitUiState();
           this.emitEnemyDeathParticles(e.sprite.x, e.sprite.y);
@@ -1552,6 +1627,42 @@
             frameRate: 6,
             repeat: -1,
           });
+        }
+
+        if (!this.textures.exists('boss-bull')) {
+          const canvas = this.textures.createCanvas('boss-bull', 64, 64);
+          const ctx = canvas.getContext();
+
+          // Body
+          ctx.fillStyle = '#4a2a2a'; // Dark Iron/Brown
+          ctx.beginPath();
+          ctx.arc(32, 36, 28, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          // Horns
+          ctx.fillStyle = '#e0e0e0';
+          ctx.beginPath();
+          ctx.moveTo(10, 20); ctx.lineTo(0, 0); ctx.lineTo(24, 14); // Left
+          ctx.moveTo(54, 20); ctx.lineTo(64, 0); ctx.lineTo(40, 14); // Right
+          ctx.fill();
+          ctx.stroke();
+
+          // Eyes
+          ctx.fillStyle = '#ff0000';
+          ctx.beginPath();
+          ctx.arc(22, 30, 6, 0, Math.PI * 2);
+          ctx.arc(42, 30, 6, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Ring
+          ctx.strokeStyle = '#ffd700';
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(32, 50, 6, 0, Math.PI * 2); ctx.stroke();
+
+          canvas.refresh();
         }
 
         if (!this.textures.exists('shadow')) {
