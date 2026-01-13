@@ -1274,9 +1274,10 @@
             }
             // Boss Death
             this.score += 5000;
-            this.showToast("BOSS DEFEATED!");
+            const ui = this.scene.get('UIScene');
+            if (ui) ui.showToast("BOSS DEFEATED!");
             this.emitEnemyDeathParticles(e.sprite.x, e.sprite.y);
-            // Drop Remote
+            // Drop Remote (Forced)
             this.maybeSpawnPowerUp(e.tileX, e.tileY, 'remote');
             e.sprite.destroy();
             e.shadow.destroy();
@@ -1378,16 +1379,20 @@
         });
       }
 
-      maybeSpawnPowerUp(tileX, tileY) {
+      maybeSpawnPowerUp(tileX, tileY, forcedType = null) {
         if (this.powerUpByTile.has(`${tileX},${tileY}`)) return;
-        if (Math.random() > 0.30) return;
 
-        const r = Math.random();
-        let type = 'bomb';
-        if (r < 0.40) type = 'bomb';
-        else if (r < 0.70) type = 'radius';
-        else if (r < 0.90) type = 'speed';
-        else type = 'remote';
+        // If forcedType is provided, skip RNG check
+        if (!forcedType && Math.random() > 0.30) return;
+
+        let type = forcedType || 'bomb';
+        if (!forcedType) {
+          const r = Math.random();
+          if (r < 0.40) type = 'bomb';
+          else if (r < 0.70) type = 'radius';
+          else if (r < 0.90) type = 'speed';
+          else type = 'remote';
+        }
 
         const pos = tileToWorldCenter(tileX, tileY);
         const shadow = this.add.image(pos.x, pos.y + 14, 'shadow');
@@ -1398,8 +1403,8 @@
         sprite.setDepth(3.1);
 
         const powerUp = { type, tileX, tileY, sprite, shadow, isTrap: false };
-        // Unfair Trap Logic
-        if (this.isUnfair && Math.random() < 0.25) { // 25% trap rate
+        // Unfair Trap Logic (Never trap the Boss loot)
+        if (!forcedType && this.isUnfair && Math.random() < 0.25) {
           powerUp.isTrap = true;
         }
 
@@ -1438,7 +1443,8 @@
           else if (type === 'speed') this.speedMsP1 = Math.max(65, this.speedMsP1 - 10);
           else if (type === 'remote') {
             this.hasRemoteP1 = true;
-            this.showToast("REMOTE ACQUIRED! Press 'E'");
+            const ui = this.scene.get('UIScene');
+            if (ui) ui.showToast("REMOTE ACQUIRED! Press 'E'");
             const btn = document.getElementById('m-detonate');
             if (btn) btn.style.display = 'flex';
           }
