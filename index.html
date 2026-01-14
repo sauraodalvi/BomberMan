@@ -303,6 +303,36 @@
       cursor: pointer;
     }
 
+    /* Global Floating Action Buttons */
+    #swap-btn,
+    #overlay-toggle {
+      position: absolute;
+      right: 20px;
+      width: 38px;
+      height: 38px;
+      background: rgba(31, 45, 71, 0.9);
+      border: 1px solid #3e4f73;
+      border-radius: 8px;
+      /* Softer corners */
+      color: #8d9ebf;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      cursor: pointer;
+      z-index: 2000;
+      /* Above everything */
+      pointer-events: auto;
+    }
+
+    #swap-btn {
+      top: 20px;
+    }
+
+    #overlay-toggle {
+      top: 70px;
+    }
+
     #mobile-controls.flipped {
       flex-direction: row-reverse;
     }
@@ -329,11 +359,13 @@
 
       #mobile-controls {
         display: flex;
-        height: 170px;
-        flex-shrink: 0;
-        margin-bottom: 0;
-        padding: 5px 20px;
+        justify-content: space-between;
         align-items: center;
+        padding: 5px 20px;
+        background: #111;
+        height: 120px;
+        position: relative;
+        touch-action: none;
       }
 
       canvas {
@@ -343,6 +375,67 @@
         height: auto !important;
         aspect-ratio: 1/1;
       }
+    }
+
+    /* Overlay Mode Overrides */
+    body.overlay-mode #center-panel {
+      display: block;
+      overflow: hidden;
+    }
+
+    body.overlay-mode #game-container {
+      height: 100dvh;
+      width: 100%;
+      margin: 0;
+    }
+
+    body.overlay-mode #mobile-controls {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      border: none;
+      padding: 0;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    /* Hide FABs inside controls? No, they are global now. */
+
+    body.overlay-mode #dpad {
+      position: absolute;
+      bottom: 20px;
+      left: 40px;
+      transform: scale(0.85);
+      transform-origin: bottom left;
+    }
+
+    body.overlay-mode #mobile-controls>div:last-child {
+      position: absolute;
+      bottom: 25px;
+      right: 40px;
+      pointer-events: auto;
+      transform: scale(0.9);
+      transform-origin: bottom right;
+    }
+
+    /* Hand Swap Logic for Overlay */
+    body.overlay-mode #mobile-controls.flipped #dpad {
+      left: auto;
+      right: 40px;
+      transform-origin: bottom right;
+    }
+
+    body.overlay-mode #mobile-controls.flipped>div:last-child {
+      right: auto;
+      left: 40px;
+      transform-origin: bottom left;
+    }
+
+    body.overlay-mode #seo-content {
+      display: none;
     }
 
     /* Mobile Landscape Optimization (Game Middle, Controls Left/Right) */
@@ -374,7 +467,6 @@
 
       /* Interactive Elements */
       #dpad,
-      #swap-btn,
       .d-btn,
       #m-bomb,
       #m-detonate {
@@ -397,15 +489,6 @@
         pointer-events: auto;
         transform: scale(0.9);
         transform-origin: bottom right;
-      }
-
-      #swap-btn {
-        position: absolute;
-        top: 20px;
-        right: 20px;
-        transform: none;
-        pointer-events: auto;
-        opacity: 0.6;
       }
 
       #mobile-controls.flipped #dpad {
@@ -436,6 +519,10 @@
     <div id="center-panel">
       <div id="game-container"></div>
 
+      <!-- Mobile Controls (Touch) -->
+      <div id="swap-btn" title="Swap Controls">⇄</div>
+      <div id="overlay-toggle" title="Toggle Overlay Mode">🎮</div>
+
       <div id="mobile-controls">
         <div id="dpad">
           <div id="btn-u" class="d-btn" data-key="up">▲</div>
@@ -443,7 +530,7 @@
           <div id="btn-r" class="d-btn" data-key="right">▶</div>
           <div id="btn-d" class="d-btn" data-key="down">▼</div>
         </div>
-        <div id="swap-btn" title="Swap Controls">⇄</div>
+        <!-- Spacer/Center is empty now -->
         <div style="display:flex; gap:12px; align-items:center;">
           <div id="m-detonate" data-key="detonate" role="button" style="display:none;">📡</div>
           <div id="m-bomb" data-key="bomb" role="button">💣</div>
@@ -692,9 +779,9 @@
         const spawnList = filtered.slice(0, enemyCount);
 
         for (const s of spawnList) {
-          // If a destructible block is occupying the spawn, clear it.
+          // If a destructible block is occupying the spawn, clear it (No Score).
           if (this.blockByTile.has(`${s.x},${s.y}`)) {
-            this.destroyBlockAt(s.x, s.y);
+            this.destroyBlockAt(s.x, s.y, false);
           }
 
           const pos = tileToWorldCenter(s.x, s.y);
@@ -1443,7 +1530,7 @@
         return out;
       }
 
-      destroyBlockAt(tileX, tileY) {
+      destroyBlockAt(tileX, tileY, giveScore = true) {
         const key = `${tileX},${tileY}`;
         const block = this.blockByTile.get(key);
         if (!block) return;
@@ -1452,8 +1539,10 @@
         this.blockByTile.delete(key);
         s.destroy();
 
-        this.score += 10;
-        this.emitUiState();
+        if (giveScore) {
+          this.score += 10;
+          this.emitUiState();
+        }
 
         const worldPos = tileToWorldCenter(tileX, tileY);
         this.emitBlockDebris(worldPos.x, worldPos.y);
@@ -1624,6 +1713,30 @@
         this.emitBlockDebris(this.player.x, this.player.y);
         this.physics.pause();
 
+        // High Score Checking
+        const modeKey = this.isUnfair ? 'bb_hs_unfair' : 'bb_hs_normal';
+        let highScoreData = null;
+        try {
+          highScoreData = JSON.parse(localStorage.getItem(modeKey));
+        } catch (e) { }
+
+        const currentData = {
+          score: this.score,
+          level: this.level,
+          lives: 0, // Should be 0 since dead, but maybe track max reached?
+          bombs: this.maxBombsP1,
+          rad: this.blastRadiusP1,
+          speed: this.speedMsP1,
+          remote: this.hasRemoteP1
+        };
+
+        let isNewRecord = false;
+        if (!highScoreData || this.score > highScoreData.score) {
+          isNewRecord = true;
+          localStorage.setItem(modeKey, JSON.stringify(currentData));
+          highScoreData = currentData;
+        }
+
         // Game Over UI
         const cx = WORLD_W / 2;
         const cy = WORLD_H / 2;
@@ -1631,20 +1744,36 @@
         const ov = this.add.rectangle(cx, cy, WORLD_W, WORLD_H, 0x0b0f1a, 0.9).setInteractive();
         ov.setDepth(3000);
 
-        const t1 = this.add.text(cx, cy - 50, 'GAME OVER', { fontSize: '48px', color: '#ff4f4f', fontStyle: '900', stroke: '#fff', strokeThickness: 6 }).setOrigin(0.5);
+        const t1 = this.add.text(cx, cy - 80, 'GAME OVER', { fontSize: '48px', color: '#ff4f4f', fontStyle: '900', stroke: '#fff', strokeThickness: 6 }).setOrigin(0.5);
         t1.setDepth(3001);
 
-        const t2 = this.add.text(cx, cy + 10, `Final Score: ${this.score}`, { fontSize: '24px', color: '#ffd36b', fontStyle: 'bold' }).setOrigin(0.5);
+        const t2 = this.add.text(cx, cy - 20, `Final Score: ${this.score}`, { fontSize: '28px', color: '#ffd36b', fontStyle: 'bold' }).setOrigin(0.5);
         t2.setDepth(3001);
 
-        const btn = this.add.rectangle(cx, cy + 80, 180, 50, 0x3e4f73).setStrokeStyle(2, 0x7ce6ff);
+        if (isNewRecord) {
+          const tHs = this.add.text(cx, cy + 20, '🏆 NEW HIGH SCORE! 🏆', { fontSize: '32px', color: '#55ff55', fontStyle: '900', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
+          tHs.setDepth(3001);
+          // Animation removed as requested
+        } else {
+          const tHs = this.add.text(cx, cy + 20, `High Score: ${highScoreData.score}`, { fontSize: '20px', color: '#8d9ebf' }).setOrigin(0.5);
+          tHs.setDepth(3001);
+        }
+
+        // Show Stats of High Score
+        if (highScoreData) {
+          const statsText = `Record Stats: Lvl ${highScoreData.level} | 💣${highScoreData.bombs} 💥${highScoreData.rad} 👟${(200 - highScoreData.speed) / 10}`;
+          const tStats = this.add.text(cx, cy + 50, statsText, { fontSize: '16px', color: '#aaa' }).setOrigin(0.5);
+          tStats.setDepth(3001);
+        }
+
+        const btn = this.add.rectangle(cx, cy + 100, 180, 50, 0x3e4f73).setStrokeStyle(2, 0x7ce6ff);
         btn.setDepth(3001);
-        const btnTxt = this.add.text(cx, cy + 80, 'TRY AGAIN', { fontSize: '20px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+        const btnTxt = this.add.text(cx, cy + 100, 'TRY AGAIN', { fontSize: '20px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
         btnTxt.setDepth(3002);
 
         btn.setInteractive({ useHandCursor: true })
           .on('pointerdown', () => {
-            this.scene.restart({ level: 1, stats: null, localMp: false });
+            this.scene.restart({ level: 1, stats: null, localMp: false, unfair: this.isUnfair });
           })
           .on('pointerover', () => btn.setFillStyle(0x4f6491))
           .on('pointerout', () => btn.setFillStyle(0x3e4f73));
@@ -2436,15 +2565,27 @@
     const swapBtn = document.getElementById('swap-btn');
     const controls = document.getElementById('mobile-controls');
 
+    swapBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent game input
+      controls.classList.toggle('flipped');
+      localStorage.setItem('bm_swap', controls.classList.contains('flipped'));
+    });
+
+    document.getElementById('overlay-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.body.classList.toggle('overlay-mode');
+      // Auto-scroll to top to hide address bar
+      window.scrollTo(0, 0);
+    });
+
+    // Auto-detect landscape match disabled as per user request (Manual Only)
+
+
     // Load saved pref
     if (localStorage.getItem('bm_swap') === 'true') {
       controls.classList.add('flipped');
     }
-
-    swapBtn.addEventListener('click', () => {
-      controls.classList.toggle('flipped');
-      localStorage.setItem('bm_swap', controls.classList.contains('flipped'));
-    });
+    // End of script
   </script>
 </body>
 
