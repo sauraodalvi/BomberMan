@@ -305,7 +305,9 @@
 
     /* Global Floating Action Buttons */
     #swap-btn,
-    #overlay-toggle {
+    #overlay-toggle,
+    #sound-toggle,
+    #haptic-toggle {
       position: absolute;
       right: 20px;
       width: 38px;
@@ -323,6 +325,7 @@
       z-index: 2000;
       /* Above everything */
       pointer-events: auto;
+      user-select: none;
     }
 
     #swap-btn {
@@ -331,6 +334,46 @@
 
     #overlay-toggle {
       top: 70px;
+    }
+
+    #sound-toggle {
+      top: 120px;
+    }
+
+    #haptic-toggle {
+      top: 170px;
+    }
+
+    /* Toggle OFF States */
+    .toggle-off {
+      opacity: 0.5;
+      filter: grayscale(100%);
+      text-decoration: line-through;
+    }
+
+    /* Overlay Mode overrides for button positions */
+    body.overlay-mode #swap-btn {
+      top: 20px;
+    }
+
+    body.overlay-mode #overlay-toggle {
+      top: 70px;
+    }
+
+    body.overlay-mode #sound-toggle {
+      top: 120px;
+    }
+
+    body.overlay-mode #haptic-toggle {
+      top: 170px;
+    }
+
+    /* Adjust right side stack opacity in overlay mode to not distract */
+    body.overlay-mode #swap-btn,
+    body.overlay-mode #overlay-toggle,
+    body.overlay-mode #sound-toggle,
+    body.overlay-mode #haptic-toggle {
+      opacity: 0.7;
     }
 
     #mobile-controls.flipped {
@@ -522,6 +565,8 @@
       <!-- Mobile Controls (Touch) -->
       <div id="swap-btn" title="Swap Controls">⇄</div>
       <div id="overlay-toggle" title="Toggle Overlay Mode">🎮</div>
+      <div id="sound-toggle" title="Toggle Sound">🔊</div>
+      <div id="haptic-toggle" title="Toggle Vibration">📳</div>
 
       <div id="mobile-controls">
         <div id="dpad">
@@ -642,6 +687,122 @@
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <script>
+    // --- ZzFX Micro (Sound) ---
+    // ZzFX - Zuper Zmall Zound Zynth - MIT License - Copyright 2019 Frank Force
+    // --- ZzFX Micro (Readable) ---
+    // ZzFX - Zuper Zmall Zound Zynth - MIT License - Copyright 2019 Frank Force
+    const zzfxV = 0.3; // Volume
+
+    const zzfx = (...samples) => {
+      if (!window.audioCtx) window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
+
+      let buffer = window.audioCtx.createBuffer(samples.length, samples[0].length, 44100);
+      samples.forEach((data, i) => buffer.getChannelData(i).set(data));
+
+      let source = window.audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(window.audioCtx.destination);
+      source.start();
+      return source;
+    }
+
+    const zzfxG = (
+      volume = 1, randomness = .05, frequency = 220, attack = 0, sustain = 0,
+      release = .1, shape = 0, shapeCurve = 1, slide = 0, deltaSlide = 0,
+      pitchJump = 0, pitchJumpTime = 0, repeatTime = 0, noise = 0, modulation = 0,
+      bitCrush = 0, delay = 0, sustainVolume = 1, decay = 0, tremolo = 0
+    ) => {
+      let PI2 = Math.PI * 2, sampleRate = 44100;
+      let startSlide = slide *= 500 * PI2 / sampleRate / sampleRate;
+      let startFrequency = frequency *= (1 + randomness * 2 * Math.random() - randomness) * PI2 / sampleRate;
+      let b = [], t = 0, tm = 0, i = 0, j = 1, r = 0, c = 0, s = 0, f, xc;
+
+      // Scale parameters
+      attack = attack * sampleRate + 9; // Minimum attack to prevent pops
+      decay *= sampleRate;
+      sustain *= sampleRate;
+      release *= sampleRate;
+      delay *= sampleRate;
+      deltaSlide *= 500 * PI2 / sampleRate / sampleRate / sampleRate;
+      pitchJump *= 500 * PI2 / sampleRate / sampleRate;
+      pitchJumpTime *= sampleRate;
+      repeatTime *= sampleRate;
+
+      // Generate waveform
+      let length = attack + decay + sustain + release + delay | 0;
+      for (let x = 0; x < length; x++) {
+        if (j && ++t > pitchJumpTime) {
+          frequency += pitchJump;
+          startFrequency += pitchJump;
+          j = 0;
+        }
+        if (repeatTime && ++tm > repeatTime) {
+          frequency = startFrequency;
+          slide = startSlide;
+          j = 1;
+          tm = 0;
+        }
+        if (x < attack) {
+          f = x / attack;
+        } else if (x < attack + decay) {
+          f = 1 - (x - attack) / decay * (1 - sustainVolume);
+        } else if (x < attack + decay + sustain) {
+          f = sustainVolume;
+        } else {
+          f = (1 - (x - attack - decay - sustain) / release) * sustainVolume;
+        }
+
+        f = delay ? f / 2 : (x < length - delay ? f : 0);
+
+        // Oscillator
+        s += (frequency += slide += deltaSlide);
+        c = (Math.cos(s) + 1) / 2;
+        let val = shape ? shape > 3 ? (Math.random() - .5) : Math.max(Math.min(c * shapeCurve - 1, 1), -1) : Math.sin(s);
+
+        // Modulation & Noise
+        val = val * Math.cos(s * modulation);
+        val += Math.random() * noise * (1 - c);
+
+        b[x] = volume * zzfxV * val * f;
+      }
+      return b;
+    }
+
+    // Init Audio Context on first click (Anywhere)
+    document.addEventListener('click', () => {
+      if (!window.audioCtx) window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
+    }, { once: true });
+
+    // SFX Presets (Tunings)
+    const SFX = {
+      bomb: () => zzfxG(1.1, .05, 180, 0, .1, .1, 0, 1, 0, 0, 0, 0, 0, .5, 0, 0, 0, .4, .03, .01), // Plop
+      explode: () => zzfxG(1.7, 0, 60, 0, .05, .3, 4, 1.6, -1.8, 0, 0, 0, 0, 1.5, 0, .1, 0, .3, .1, .1), // Short Crunch
+      powerup: () => zzfxG(1.3, .05, 739, 0, .1, .2, 0, 1.3, 0, 0, 0, 0, 0, .1, 0, 0, 0, .1, .1, .05), // Ching!
+      die: () => zzfxG(1.9, 0, 220, .1, .5, .8, 1, 1.8, 2, 0, 0, 0, 0, 1.3, 0, .2, 0, .3, .08, .05), // Descending Glitch
+      win: () => zzfxG(1.2, .05, 483, 0, .1, .3, 1, 1.5, 0, 0, 250, .06, 0, .1, .1, .1, .1, .3, .01) // Fanfare
+    };
+
+    // Global Managers
+    let soundEnabled = localStorage.getItem('bm_sound') !== 'false';
+    let hapticEnabled = localStorage.getItem('bm_haptic') !== 'false';
+
+    function playSound(name) {
+      if (soundEnabled && SFX[name]) {
+        // Resume context if suspended (browser requirements)
+        if (window.audioCtx && window.audioCtx.state === 'suspended') window.audioCtx.resume();
+        const data = SFX[name]();
+        zzfx(data);
+      }
+    }
+
+    function triggerHaptic(duration) {
+      if (hapticEnabled && navigator.vibrate) {
+        navigator.vibrate(duration);
+      }
+    }
+
     // Simple LCG for seeded random numbers
     class SimpleRNG {
       constructor(seed) { this.state = seed || 1; }
@@ -1386,6 +1547,10 @@
 
         this.cameras.main.shake(120, 0.006);
 
+        // SFX & Haptic
+        playSound('explode');
+        triggerHaptic([40, 20, 40]); // Rumble
+
         for (const t of tiles) {
           const pos = tileToWorldCenter(t.tileX, t.tileY);
 
@@ -1483,6 +1648,9 @@
         const txt = this.add.text(WORLD_W / 2, WORLD_H / 2, 'LEVEL COMPLETE!', { fontSize: '32px', color: '#ffd36b', fontStyle: '900', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
         txt.setDepth(2000);
         this.tweens.add({ targets: txt, scale: { from: 0.5, to: 1.2 }, duration: 400, ease: 'Back.out' });
+
+        playSound('win');
+        triggerHaptic([100, 50, 100, 50, 200]);
 
         this.time.delayedCall(2000, () => {
           this.scene.restart({
@@ -2609,6 +2777,41 @@
     if (localStorage.getItem('bm_swap') === 'true') {
       controls.classList.add('flipped');
     }
+    // Sound & Haptic Toggles
+    const sBtn = document.getElementById('sound-toggle');
+    const hBtn = document.getElementById('haptic-toggle');
+
+    function updateToggles() {
+      sBtn.textContent = soundEnabled ? '🔊' : '🔇';
+      sBtn.classList.toggle('toggle-off', !soundEnabled);
+      hBtn.classList.toggle('toggle-off', !hapticEnabled);
+    }
+
+    sBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      soundEnabled = !soundEnabled;
+      localStorage.setItem('bm_sound', soundEnabled);
+      updateToggles();
+      // Initialize Audio Context on first interaction
+      if (soundEnabled && (!window.audioCtx || window.audioCtx.state === 'suspended')) playSound('powerup');
+    });
+
+    hBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hapticEnabled = !hapticEnabled;
+      localStorage.setItem('bm_haptic', hapticEnabled);
+      updateToggles();
+      if (hapticEnabled) triggerHaptic(50);
+    });
+
+    // Hide Haptic Toggle if not supported (Desktop/iOS)
+    if (!navigator.vibrate) {
+      hBtn.style.display = 'none';
+      hapticEnabled = false;
+    }
+
+    updateToggles();
+
     // End of script
   </script>
 </body>
