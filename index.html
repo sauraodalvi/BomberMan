@@ -807,7 +807,10 @@
       if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
 
       // Warm up Haptics (Android sometimes needs an interaction trigger)
-      if (navigator.vibrate) navigator.vibrate(10);
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+        console.log('Haptics Warmed Up');
+      }
     }, { once: true });
 
     // SFX Presets (Tunings)
