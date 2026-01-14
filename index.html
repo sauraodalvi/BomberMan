@@ -450,6 +450,8 @@
       padding: 0;
       pointer-events: none;
       z-index: 100;
+      display: flex !important;
+      /* FORCE display even if screen is wide (Pixel) */
     }
 
     /* Hide FABs inside controls? No, they are global now. */
@@ -460,6 +462,8 @@
       left: 40px;
       transform: scale(0.85);
       transform-origin: bottom left;
+      display: grid !important;
+      /* FORCE visibility */
     }
 
     body.overlay-mode #mobile-controls>div:last-child {
@@ -776,10 +780,13 @@
       return b;
     }
 
-    // Init Audio Context on first click (Anywhere)
+    // Init Audio Context & Haptics on first click (Anywhere)
     document.addEventListener('click', () => {
       if (!window.audioCtx) window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
+
+      // Warm up Haptics (Android sometimes needs an interaction trigger)
+      if (navigator.vibrate) navigator.vibrate(10);
     }, { once: true });
 
     // SFX Presets (Tunings)
