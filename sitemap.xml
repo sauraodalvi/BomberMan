@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://sauraodalvi.github.io/BomberMan/</loc>
+    <loc>https://sauraodalvi.github.io/BombBattle/</loc>
     <lastmod>2025-01-16</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://sauraodalvi.github.io/BomberMan/multiplayer.html</loc>
+    <loc>https://sauraodalvi.github.io/BombBattle/multiplayer.html</loc>
     <lastmod>2025-01-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>

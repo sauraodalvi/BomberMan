@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://sauraodalvi.github.io/BomberMan/sitemap.xml
+Sitemap: https://sauraodalvi.github.io/BombBattle/sitemap.xml
