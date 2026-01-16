@@ -1,17 +1,16 @@
 <div align="center">
 
 # 💣 Bomb Battle Web
-### The Ultimate "Unfair" Bomberman Clone
+### The Ultimate "Unfair" Arcade Battle
 
 [![Play Now](https://img.shields.io/badge/PLAY%20NOW-Click%20Here-red?style=for-the-badge&logo=google-chrome&logoColor=white)](https://sauraodalvi.github.io/BomberMan/)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 [![Built With Phaser](https://img.shields.io/badge/Built%20With-Phaser%203-green?style=flat-square&logo=html5)](https://phaser.io/)
 
-<img src="./og-image.png" alt="Bomb Battle Key Art" width="100%" style="border-radius: 10px; box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);">
+<img src="./gameplay.gif" alt="Bomb Battle Gameplay" width="100%" style="border-radius: 10px; box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);">
 
 <br/>
 
-**Bomb Battle Web** is a fast-paced, browser-based arcade game that takes the classic strategy of *Bomberman* and injects it with chaos. Features a brutal **Unfair Mode**, **Local PvP**, and **Smart AI** that actually wants to kill you.
+**Bomb Battle Web** is a fast-paced, browser-based arcade game inspired by classic strategy games. Built as a fun **side project**, it features a brutal **Unfair Mode**, **Local PvP**, and huge explosions.
 
 No downloads. No Login. Just instant destruction.
 
@@ -21,26 +20,34 @@ No downloads. No Login. Just instant destruction.
 
 ---
 
+## 🎮 What is this?
+I built this game to explore web-based multiplayer and game development with **Phaser 3**. It's a tribute to the classic "place bomb, run away" genre, but with modern twists like physics-based debris, dynamic lighting, and a rage-inducing "Unfair" difficulty.
+
+It's completely free, open-source, and runs directly in your browser.
+
+---
+
 ## 🔥 Key Features
 
 | Feature | Description |
 | :--- | :--- |
 | **💀 Unfair Mode** | Toggle the skull button for pain: randomized fuse times, fake power-ups, and floor tiles that betray you. |
 | **⚔️ Local PvP** | Challenge a friend on the same keyboard. Fast 1v1 battles to settle grudges. |
-| **👻 Smart Enemies** | From the classic Ballom to **Ghost Blobs** that phase through walls and the **Iron Bull Boss**. |
+| **👻 Smart Enemies** | From the classic Ballom to **Ghost Blobs** that phase through walls. |
 | **⚡ Instant Action** | Optimized for zero-latency gameplay on Chrome, Firefox, and Edge. |
 
 ---
 
-## 🕹️ Controls
+## 🕹️ How To Play
 
-Beat the campaign or destroy your friends.
+The goal is simple: **Blow up your enemies before they blow you up.**
+
+### **Controls**
 
 | Action | Player 1 (Blue) | Player 2 (Red) |
 | :--- | :---: | :---: |
 | **Move** | `W` `A` `S` `D` | `Arrow Keys` |
 | **Place Bomb** | `SPACE` | `ENTER` |
-| **Detonate** | `SHIFT` | `/` |
 
 > **Mobile Support:** Touch controls are automatically enabled on mobile devices with detailed d-pad and action buttons!
 
@@ -50,16 +57,15 @@ Beat the campaign or destroy your friends.
 
 Built with vanilla JavaScript and modern web technologies to ensure high performance and zero dependencies for the client.
 
-*   **Engine:** [Phaser 3](https://phaser.io/) (Rendering, Physics, Input)
-*   **Multiplayer:** [Socket.io](https://socket.io/) (Real-time state sync)
-*   **Backend:** Node.js + Express (Asset serving & socket handling)
-*   **Audio:** ZzFX (Micro-synthesis for tiny footprint SFX)
+*   **Engine:** [Phaser 3](https://phaser.io/)
+*   **Multiplayer:** [Socket.io](https://socket.io/)
+*   **Backend:** Node.js + Express
 
 ---
 
-## 🚀 Run Locally
+## 🚀 Run It Yourself
 
-Want to mod the game or see how it works?
+Want to look at the code?
 
 ```bash
 # 1. Clone the repo
@@ -77,5 +83,4 @@ Open `http://localhost:3000` to play!
 ---
 
 ## 📜 Disclaimer
-
-*This is a non-profit fan project created for educational purposes. It is not affiliated with, endorsed, sponsored, or specifically approved by Konami Digital Entertainment. The original classic game is a property of its respective owners.*
+This is a fan-made side project created for educational purposes. All assets are either custom-made, open source, or used under fair use for parody/education.
